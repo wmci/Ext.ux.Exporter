@@ -130,7 +130,8 @@ Ext.ux.Exporter = function() {
     },
     
     download: function(exportFn, component, exporter, config) {
-    	if (this.browserSupportsDataUrls())
+    	//if (this.browserSupportsDataUrls())
+    	if (false)
     	{
     		this.encode(true);
     		var ex = this[exportFn](component, exporter, config);
