@@ -71,7 +71,19 @@ var Base64 = (function() {
  * Class providing a common way of downloading data in .xls or .csv format
  */
 Ext.ux.Exporter = function() {
+	
+	var _encode = true;
+	
   return {
+	  
+  	encode: function(bool) {
+  		_encode = bool;
+  	},
+  	
+  	format: function(f, store, config) {
+  		return (_encode ? Base64.encode(f.format(store,config)) : f.format(store, config));  
+  	},
+	  
     /**
      * Exports a grid, using the .xls formatter by default
      * @param {Ext.grid.GridPanel} grid The grid to export from
@@ -86,7 +98,7 @@ Ext.ux.Exporter = function() {
         columns: grid.getColumnModel().config
       });
       
-      return Base64.encode(formatter.format(grid.store, config));
+      return this.format(formatter, grid.store, config);
     },
     
     exportStore: function(store, formatter, config) {
@@ -97,7 +109,7 @@ Ext.ux.Exporter = function() {
          columns: config.store.fields.items
        });
        
-       return Base64.encode(formatter.format(store, config));
+       return this.format(formatter, store, config); 
     },
     
     exportTree: function(tree, formatter, config) {
@@ -110,7 +122,37 @@ Ext.ux.Exporter = function() {
         title: tree.title
       });
       
-      return Base64.encode(formatter.format(store, config));
+      return this.format(formatter, store, config); 
+    },
+    
+    browserSupportsDataUrls: function() {
+    	return !(Ext.isIE6 || Ext.isIE7 || Ext.isSafari || Ext.isSafari2 || Ext.isSafari3);
+    },
+    
+    download: function(exportFn, component, exporter, config) {
+    	if (this.browserSupportsDataUrls())
+    	{
+    		this.encode(true);
+    		var ex = this[exportFn](component, exporter, config);
+    		window.open('data:application/vnd.ms-excel;base64,' + ex, '_self');
+    	} else {
+    		this.encode(false);
+    		
+    		var ex = this[exportFn](component, exporter, config);
+    		var frm = document.createElement('form');
+    		frm.id = 'frmDummy';
+    		frm.name = id;
+    		frm.className = 'x-hidden';
+    		document.body.appendChild(frm);
+    		
+    		Ext.Ajax.request({
+    			url: '/dashboard/export_excel',
+    			method: 'POST',
+    			form: Ext.fly('frmDummy'),
+    			isUpload: true,
+    			params: {data: ex}
+    		});
+    	}
     }
   };
 }();
@@ -423,7 +465,7 @@ Ext.ux.Exporter.ExcelFormatter.Workbook = Ext.extend(Object, {
         {
           name: "Font",
           properties: [
-            {name: "FontName", value: "arial"},
+            {name: "FontName", value: "tahoma"},
             {name: "Size",     value: "10"}
           ]
         },
@@ -572,7 +614,7 @@ Ext.ux.Exporter.ExcelFormatter.Workbook = Ext.extend(Object, {
 Ext.ux.Exporter.ExcelFormatter.Worksheet = Ext.extend(Object, {
 
   constructor: function(store, config) {
-    config = config || {};
+    config = config.worksheet || {};
     
     this.store = store;
     
@@ -580,8 +622,8 @@ Ext.ux.Exporter.ExcelFormatter.Worksheet = Ext.extend(Object, {
       hasTitle   : true,
       hasHeadings: true,
       stripeRows : true,
-      
       title      : "Workbook",
+      headerTitle: '',
       columns    : store.fields == undefined ? {} : store.fields.items
     });
     
@@ -607,7 +649,7 @@ Ext.ux.Exporter.ExcelFormatter.Worksheet = Ext.extend(Object, {
         '<ss:Row ss:Height="38">',
             '<ss:Cell ss:StyleID="title" ss:MergeAcross="{colCount - 1}">',
               '<ss:Data xmlns:html="http://www.w3.org/TR/REC-html40" ss:Type="String">',
-                '<html:B><html:U><html:Font html:Size="15">{title}',
+                '<html:B><html:U><html:Font html:Size="12">{headerTitle}',
                 '</html:Font></html:U></html:B></ss:Data><ss:NamedCell ss:Name="Print_Titles" />',
             '</ss:Cell>',
         '</ss:Row>',
@@ -649,7 +691,8 @@ Ext.ux.Exporter.ExcelFormatter.Worksheet = Ext.extend(Object, {
       rows    : this.buildRows().join(""),
       colCount: this.columns.length,
       rowCount: this.store.getCount() + 2,
-      title   : this.title
+      title   : this.title,
+      headerTitle: this.headerTitle
     });
   },
   
@@ -664,7 +707,7 @@ Ext.ux.Exporter.ExcelFormatter.Worksheet = Ext.extend(Object, {
   },
   
   buildColumn: function(width) {
-    return String.format('<ss:Column ss:AutoFitWidth="1" ss:Width="{0}" />', width || 164);
+    return String.format('<ss:Column ss:AutoFitWidth="0" ss:Width="{0}" />', width || 60);
   },
   
   buildRows: function() {
@@ -680,15 +723,16 @@ Ext.ux.Exporter.ExcelFormatter.Worksheet = Ext.extend(Object, {
   buildHeader: function() {
     var cells = [];
     
-    Ext.each(this.columns, function(col) {
+    Ext.each(this.columns, function(col, index) {
       var title;
       
       if (col.header != undefined) {
         title = col.header;
-      } else {
+      } else if (col.name == undefined) {
+    	  return;
+      } else{
         //make columns taken from Record fields (e.g. with a col.name) human-readable
-        title = col.name.replace(/_/g, " ");
-        title = title.charAt(0).toUpperCase() + title.substr(1).toLowerCase();
+        title = col.name.underscore().titleize();
       }
       
       cells.push(String.format('<ss:Cell ss:StyleID="headercell"><ss:Data ss:Type="String">{0}</ss:Data><ss:NamedCell ss:Name="Print_Titles" /></ss:Cell>', title));
